@@ -1,0 +1,18 @@
+# SSL certificates (secrets)
+nginx/ssl/*.crt
+nginx/ssl/*.key
+!nginx/ssl/README.md
+
+# Environment
+.env
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db

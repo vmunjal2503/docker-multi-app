@@ -1,0 +1,85 @@
+services:
+  # ──────────────── Nginx Reverse Proxy ────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: reverse-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      flask-api:
+        condition: service_healthy
+      node-api:
+        condition: service_healthy
+      static-site:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/nginx-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ──────────────── App 1: Flask API (Python) ────────────────
+  flask-api:
+    build:
+      context: ./apps/flask-api
+      dockerfile: Dockerfile
+    container_name: flask-api
+    expose:
+      - "5001"
+    environment:
+      - FLASK_ENV=production
+      - APP_NAME=flask-api
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ──────────────── App 2: Node.js API (Express) ────────────────
+  node-api:
+    build:
+      context: ./apps/node-api
+      dockerfile: Dockerfile
+    container_name: node-api
+    expose:
+      - "3001"
+    environment:
+      - NODE_ENV=production
+      - APP_NAME=node-api
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ──────────────── App 3: Static Site (Nginx) ────────────────
+  static-site:
+    build:
+      context: ./apps/static-site
+      dockerfile: Dockerfile
+    container_name: static-site
+    expose:
+      - "8080"
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
