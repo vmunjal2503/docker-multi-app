@@ -1,101 +1,120 @@
-# Docker Multi-App — Nginx Reverse Proxy Setup
+# Docker Multi-App
 
-Production-ready Docker Compose setup running 3 different apps behind an Nginx reverse proxy with SSL, rate limiting, and security headers.
+**Run 3 different apps on one server, each on its own domain, with one command.**
 
-## Why I Built This
+---
 
-**The Problem:** Startups and small teams often run multiple services (API, frontend, admin panel, docs) on a single server to save costs. But configuring Nginx to route traffic to each app, setting up SSL, adding security headers, and making it all work with Docker is tedious, error-prone, and poorly documented. Most tutorials cover the basics but skip rate limiting, gzip, health checks, and production hardening.
+## What is this?
 
-**The Solution:** One `docker compose up -d` command gives you a fully configured Nginx reverse proxy routing to 3 apps — with SSL, rate limiting, gzip compression, security headers, and health monitoring out of the box. Need to add a 4th app? Copy one config file, add 3 lines to docker-compose, done.
-
-**Built from real client work** — I've set up this exact pattern for multiple Upwork clients running multi-app servers on AWS EC2. This template captures everything I've learned about doing it right.
+You have multiple apps (an API, a frontend, a docs site) and one server. This sets up Nginx to route each domain to the right app — all running in Docker containers.
 
 ```
-                    ┌───────────────────────────────────────────────┐
-                    │              Docker Network                   │
-                    │                                               │
- ┌──────────┐      │  ┌─────────────────────────────────────────┐  │
- │  Client   │──────│─▶│   Nginx Reverse Proxy (:80 / :443)     │  │
- │  Browser  │      │  │   - SSL termination                    │  │
- └──────────┘      │  │   - Rate limiting (10 req/s)           │  │
-                    │  │   - Gzip compression                   │  │
-                    │  │   - Security headers                   │  │
-                    │  └──┬──────────┬──────────┬───────────────┘  │
-                    │     │          │          │                   │
-                    │     ▼          ▼          ▼                   │
-                    │  ┌──────┐  ┌──────┐  ┌──────────┐           │
-                    │  │Flask │  │Node  │  │  Static  │           │
-                    │  │ API  │  │ API  │  │   Site   │           │
-                    │  │:5001 │  │:3001 │  │  :8080   │           │
-                    │  └──────┘  └──────┘  └──────────┘           │
-                    │  Gunicorn   Express    Nginx                  │
-                    │  Python     Node.js    HTML/CSS               │
-                    └───────────────────────────────────────────────┘
+Browser visits app1.example.com  ──┐
+Browser visits app2.example.com  ──┤──▶  Nginx  ──▶  Routes to the right app
+Browser visits app3.example.com  ──┘
 
- Routing:
-   app1.localhost  →  Flask API   (Python + Gunicorn)
-   app2.localhost  →  Node API    (Express.js)
-   app3.localhost  →  Static Site (Nginx serving HTML)
+Inside the server:
+┌──────────────────────────────────────────┐
+│  Nginx (port 80/443)                     │
+│    ├── app1.example.com → Flask API      │
+│    ├── app2.example.com → Node.js API    │
+│    └── app3.example.com → Static website │
+└──────────────────────────────────────────┘
 ```
 
-## Features
+Start everything:
 
-- **Nginx reverse proxy** with virtual host routing
-- **3 sample apps** (Flask, Node.js, Static) — easily add more
-- **SSL ready** (self-signed certs for dev, Let's Encrypt for prod)
-- **Security headers** (X-Frame-Options, CSP, HSTS, etc.)
-- **Rate limiting** (10 requests/second per IP)
-- **Gzip compression** for faster responses
-- **Health checks** on all containers
-- **Non-root containers** for security
-- **Multi-stage Docker builds** for smaller images
+```bash
+docker compose up -d
+```
 
-## Prerequisites
+---
 
-- [Docker](https://docs.docker.com/get-docker/) >= 20.10
-- [Docker Compose](https://docs.docker.com/compose/) >= 2.0
+## What problem does this solve?
 
-## Quick Start
+**Without this:** You rent 3 separate servers ($15-60/month each) for 3 apps. Or you try to configure Nginx manually — spend a day writing config files, debugging SSL, and forgetting security headers. Every new app requires 2 hours of setup.
+
+**With this:** All apps share one server. Nginx routes traffic automatically. SSL, rate limiting, compression, and security headers are pre-configured. Adding a new app takes 5 minutes — copy one config file, add 3 lines to docker-compose.
+
+---
+
+## What's included?
+
+| Component | What it does |
+|-----------|-------------|
+| **Nginx reverse proxy** | Receives all traffic on port 80/443 and routes it to the correct app based on the domain name |
+| **Flask API** (Python) | Sample API running on Gunicorn — replace with your own Python app |
+| **Node.js API** | Sample Express.js API — replace with your own Node app |
+| **Static site** | HTML/CSS served by Nginx — replace with your built React/Vue/Angular app |
+| **SSL certificates** | Self-signed for local development, easy swap to Let's Encrypt for production |
+| **Security headers** | X-Frame-Options, Content-Security-Policy, HSTS — protects against common attacks |
+| **Rate limiting** | 10 requests/second per IP — prevents abuse |
+| **Gzip compression** | Compresses responses — pages load faster |
+| **Health checks** | Docker monitors each app and restarts it if it crashes |
+
+---
+
+## How to use it
 
 ```bash
 # 1. Clone
-git clone https://github.com/yourusername/docker-multi-app.git
+git clone https://github.com/vmunjal2503/docker-multi-app.git
 cd docker-multi-app
 
-# 2. Generate SSL certs (self-signed for local dev)
+# 2. Generate SSL certificates for local testing
 make ssl-generate
 
-# 3. Add hosts entries (for local testing)
+# 3. Add local domains to your computer
 echo "127.0.0.1 app1.localhost app2.localhost app3.localhost" | sudo tee -a /etc/hosts
 
 # 4. Start everything
 make up
 
-# 5. Test
-curl http://app1.localhost/health    # Flask API
-curl http://app2.localhost/health    # Node API
-curl http://app3.localhost            # Static site
+# 5. Test — each domain goes to a different app
+curl http://app1.localhost/health    # → Flask API responds
+curl http://app2.localhost/health    # → Node.js API responds
+curl http://app3.localhost           # → Static website loads
 ```
 
-## How to Add a New App
+## How to add your own app
 
-1. Create `apps/my-new-app/` with a `Dockerfile`
-2. Add a service in `docker-compose.yml`
-3. Create `nginx/conf.d/my-new-app.conf` (copy an existing one)
+1. Put your app in `apps/my-app/` with a `Dockerfile`
+2. Add it to `docker-compose.yml` (copy an existing service, change the name)
+3. Create `nginx/conf.d/my-app.conf` (copy an existing one, change the domain)
 4. Run `make up`
 
-## Commands
+That's it. 5 minutes.
 
-```bash
-make up           # Start all containers
-make down         # Stop all containers
-make logs         # View all logs
-make health       # Check health of all apps
-make ssl-generate # Generate self-signed SSL certificates
-make restart      # Restart all containers
-make build        # Rebuild all images
-make clean        # Remove containers, images, and volumes
+---
+
+## How is the code organized?
+
 ```
+docker-multi-app/
+├── docker-compose.yml          # Defines all containers and how they connect
+├── nginx/
+│   ├── nginx.conf              # Main Nginx config (compression, rate limits, security)
+│   └── conf.d/
+│       ├── app1.conf           # Routes app1.localhost → Flask API
+│       ├── app2.conf           # Routes app2.localhost → Node.js API
+│       └── app3.conf           # Routes app3.localhost → Static site
+├── apps/
+│   ├── flask-api/              # Python API (Flask + Gunicorn)
+│   ├── node-api/               # Node.js API (Express)
+│   └── static-site/            # Plain HTML/CSS website
+├── scripts/
+│   ├── setup-ssl.sh            # Generate self-signed SSL certs
+│   └── health-check.sh         # Check if all apps are running
+└── Makefile                    # Shortcuts: make up, make down, make logs, make health
+```
+
+---
+
+## Who is this for?
+
+- Anyone running multiple apps on one VPS/EC2 and tired of configuring Nginx by hand
+- Freelancers deploying client projects that need API + frontend on one server
+- Teams that want a quick local dev environment with multiple services
 
 ---
 
