@@ -2,6 +2,14 @@
 
 Production-ready Docker Compose setup running 3 different apps behind an Nginx reverse proxy with SSL, rate limiting, and security headers.
 
+## Why I Built This
+
+**The Problem:** Startups and small teams often run multiple services (API, frontend, admin panel, docs) on a single server to save costs. But configuring Nginx to route traffic to each app, setting up SSL, adding security headers, and making it all work with Docker is tedious, error-prone, and poorly documented. Most tutorials cover the basics but skip rate limiting, gzip, health checks, and production hardening.
+
+**The Solution:** One `docker compose up -d` command gives you a fully configured Nginx reverse proxy routing to 3 apps — with SSL, rate limiting, gzip compression, security headers, and health monitoring out of the box. Need to add a 4th app? Copy one config file, add 3 lines to docker-compose, done.
+
+**Built from real client work** — I've set up this exact pattern for multiple Upwork clients running multi-app servers on AWS EC2. This template captures everything I've learned about doing it right.
+
 ```
                     ┌───────────────────────────────────────────────┐
                     │              Docker Network                   │
