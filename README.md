@@ -6,20 +6,23 @@
 
 ## What is this?
 
-You have multiple apps (an API, a frontend, a docs site) and one server. This sets up Nginx to route each domain to the right app — all running in Docker containers.
+You have multiple apps (an API, a frontend, a docs site) and one server. This sets up Nginx as a reverse proxy to route each domain to the right app — all running in Docker containers.
 
 ```
 Browser visits app1.example.com  ──┐
-Browser visits app2.example.com  ──┤──▶  Nginx  ──▶  Routes to the right app
+Browser visits app2.example.com  ──┤──▶  Nginx  ──▶  Routes to the right container
 Browser visits app3.example.com  ──┘
 
 Inside the server:
-┌──────────────────────────────────────────┐
-│  Nginx (port 80/443)                     │
-│    ├── app1.example.com → Flask API      │
-│    ├── app2.example.com → Node.js API    │
-│    └── app3.example.com → Static website │
-└──────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│  Nginx (port 80/443) — reverse proxy                  │
+│    ├── app1.example.com → Flask API    (port 5000)    │
+│    ├── app2.example.com → Node.js API  (port 3000)    │
+│    └── app3.example.com → Static site  (served by Nginx directly) │
+│                                                       │
+│  Docker network: all containers on 'app-network'      │
+│  Containers talk via service names, not IPs            │
+└───────────────────────────────────────────────────────┘
 ```
 
 Start everything:
@@ -40,17 +43,27 @@ docker compose up -d
 
 ## What's included?
 
-| Component | What it does |
-|-----------|-------------|
-| **Nginx reverse proxy** | Receives all traffic on port 80/443 and routes it to the correct app based on the domain name |
-| **Flask API** (Python) | Sample API running on Gunicorn — replace with your own Python app |
-| **Node.js API** | Sample Express.js API — replace with your own Node app |
-| **Static site** | HTML/CSS served by Nginx — replace with your built React/Vue/Angular app |
-| **SSL certificates** | Self-signed for local development, easy swap to Let's Encrypt for production |
-| **Security headers** | X-Frame-Options, Content-Security-Policy, HSTS — protects against common attacks |
-| **Rate limiting** | 10 requests/second per IP — prevents abuse |
-| **Gzip compression** | Compresses responses — pages load faster |
-| **Health checks** | Docker monitors each app and restarts it if it crashes |
+| Component | What it does | Technical Details |
+|-----------|-------------|-------------------|
+| **Nginx reverse proxy** | Receives all traffic and routes based on `Host` header | Layer 7 routing via `server_name` directive. `proxy_pass` to upstream containers using Docker DNS. Connection pooling with `keepalive 32`. |
+| **Flask API** (Python) | Sample REST API — replace with your own | Multi-stage Dockerfile: build stage installs deps, production stage runs Gunicorn with 4 workers (`--workers 4 --bind 0.0.0.0:5000`). |
+| **Node.js API** | Sample Express.js API — replace with your own | Multi-stage Dockerfile: `node:alpine` base, non-root user, `NODE_ENV=production`. Health endpoint at `/health`. |
+| **Static site** | HTML/CSS served directly by Nginx | No separate container needed — Nginx serves static files from a mounted volume. `try_files` with SPA fallback ready. |
+| **SSL/TLS** | HTTPS termination at Nginx | Self-signed certs for dev (generated via `openssl`). In production: swap to Let's Encrypt with certbot auto-renewal. TLS 1.2+ only, strong cipher suite. |
+| **Security headers** | Protects against XSS, clickjacking, MIME sniffing | `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy`, `Strict-Transport-Security` (HSTS with 1-year max-age). |
+| **Rate limiting** | Prevents brute-force and DDoS | `limit_req_zone` at 10 req/s per IP with burst of 20. Returns `429 Too Many Requests` when exceeded. |
+| **Gzip compression** | Smaller response sizes | Compresses `text/html`, `application/json`, `text/css`, `application/javascript`. Min size 1KB. Compression level 6. |
+| **Health checks** | Docker restarts crashed containers | `healthcheck` in docker-compose: `curl --fail http://localhost/health` every 30s, 3 retries, 5s timeout. |
+
+---
+
+## Architecture patterns used
+
+- **Reverse proxy pattern** — Nginx sits in front of all apps. Clients never talk to app containers directly. This gives you one place to handle SSL, auth, rate limiting, and logging.
+- **Docker service discovery** — Containers reference each other by service name (e.g., `proxy_pass http://flask-api:5000`). Docker's internal DNS resolves it. No hardcoded IPs.
+- **Multi-stage builds** — Dockerfiles use 2 stages: one to install dependencies, one to run the app. Final images are 60-80% smaller (no build tools, no dev dependencies in production).
+- **Shared Docker network** — All containers join `app-network` (bridge driver). Nginx can reach all apps, but apps can't be accessed directly from outside the Docker network.
+- **Config-driven scaling** — Each app's Nginx config is a separate file in `conf.d/`. Adding a new app = adding a new `.conf` file. Nginx auto-includes all files in `conf.d/`.
 
 ---
 
@@ -80,7 +93,7 @@ curl http://app3.localhost           # → Static website loads
 
 1. Put your app in `apps/my-app/` with a `Dockerfile`
 2. Add it to `docker-compose.yml` (copy an existing service, change the name)
-3. Create `nginx/conf.d/my-app.conf` (copy an existing one, change the domain)
+3. Create `nginx/conf.d/my-app.conf` (copy an existing one, change the `server_name` and `proxy_pass`)
 4. Run `make up`
 
 That's it. 5 minutes.
@@ -91,20 +104,20 @@ That's it. 5 minutes.
 
 ```
 docker-multi-app/
-├── docker-compose.yml          # Defines all containers and how they connect
+├── docker-compose.yml          # Defines all containers, networks, volumes, health checks
 ├── nginx/
-│   ├── nginx.conf              # Main Nginx config (compression, rate limits, security)
+│   ├── nginx.conf              # Main config: worker processes, gzip, rate limits, security headers
 │   └── conf.d/
-│       ├── app1.conf           # Routes app1.localhost → Flask API
-│       ├── app2.conf           # Routes app2.localhost → Node.js API
-│       └── app3.conf           # Routes app3.localhost → Static site
+│       ├── app1.conf           # Virtual host: app1.localhost → flask-api:5000
+│       ├── app2.conf           # Virtual host: app2.localhost → node-api:3000
+│       └── app3.conf           # Virtual host: app3.localhost → static files
 ├── apps/
-│   ├── flask-api/              # Python API (Flask + Gunicorn)
-│   ├── node-api/               # Node.js API (Express)
-│   └── static-site/            # Plain HTML/CSS website
+│   ├── flask-api/              # Python API (Flask + Gunicorn, multi-stage Dockerfile)
+│   ├── node-api/               # Node.js API (Express, non-root user, alpine base)
+│   └── static-site/            # Plain HTML/CSS (served directly by Nginx)
 ├── scripts/
-│   ├── setup-ssl.sh            # Generate self-signed SSL certs
-│   └── health-check.sh         # Check if all apps are running
+│   ├── setup-ssl.sh            # Generates self-signed certs with openssl
+│   └── health-check.sh         # Hits /health on all apps, reports status
 └── Makefile                    # Shortcuts: make up, make down, make logs, make health
 ```
 
@@ -114,7 +127,7 @@ docker-multi-app/
 
 - Anyone running multiple apps on one VPS/EC2 and tired of configuring Nginx by hand
 - Freelancers deploying client projects that need API + frontend on one server
-- Teams that want a quick local dev environment with multiple services
+- Teams that want a quick local dev environment with multiple services behind a reverse proxy
 
 ---
 
