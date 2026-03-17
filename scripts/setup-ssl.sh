@@ -9,7 +9,7 @@ echo "Generating self-signed SSL certificates..."
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
     -keyout "$SSL_DIR/selfsigned.key" \
     -out "$SSL_DIR/selfsigned.crt" \
-    -subj "/C=IN/ST=Punjab/L=Mohali/O=Difiboffins/CN=localhost"
+    -subj "/C=IN/ST=Punjab/L=Mohali/O=VikasMunjal/CN=localhost"
 
 echo "SSL certificates generated:"
 echo "  Certificate: $SSL_DIR/selfsigned.crt"
